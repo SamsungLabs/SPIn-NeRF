@@ -141,3 +141,13 @@ python DS_NeRF/run_nerf.py --config DS_NeRF/configs/config.txt --i_feat 200 --lp
 ```
 
 Note that our experiments were done on Nvidia A6000 GPUs. In case of running on GPUs with lower memory, you might get out-of-memory errors. To prevent that, please try increasing the arguments `--lpips_render_factor` and `--patch_len_factor`, or reducing `--lpips_batch_size`. 
+
+#### Notes on mask dilation
+Please note that as mentioned in the paper, the masks are dilated by default with a 5x5 kernel for 5 iterations to ensure that all of the object is masked, and that the effects of the shadow of the unwanted objects on the scene is reduced. If you wish to alter the dilation, first, you need to change the dilations applied by the LaMa model to generate the inpaintings under `lama/saicinpainting/evaluation/refinement.py` at the following line:
+```
+tmp = cv2.dilate(tmp.cpu().numpy().astype('uint8'), np.ones((5, 5), np.uint8), iterations=5)
+```
+Then, you also need to change the LLFF loader to load the masks with proper dilations applied to them under `DS_NeRF/load_llff.py`. In this file, the following line is responsible for the dilations:
+```
+msk = cv2.dilate(msk, np.ones((5, 5), np.uint8), iterations=5)
+```
