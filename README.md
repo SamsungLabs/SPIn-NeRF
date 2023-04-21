@@ -151,3 +151,15 @@ Then, you also need to change the LLFF loader to load the masks with proper dila
 ```
 msk = cv2.dilate(msk, np.ones((5, 5), np.uint8), iterations=5)
 ```
+
+
+# BibTeX
+If you find SPIn-NeRF useful in your work, please consider citing it:
+```
+@inproceedings{spinnerf,
+      title={{SPIn-NeRF}: Multiview Segmentation and Perceptual Inpainting with Neural Radiance Fields}, 
+      author={Ashkan Mirzaei and Tristan Aumentado-Armstrong and Konstantinos G. Derpanis and Jonathan Kelly and Marcus A. Brubaker and Igor Gilitschenski and Alex Levinshtein},
+      year={2023},
+      booktitle={CVPR},
+}
+```
