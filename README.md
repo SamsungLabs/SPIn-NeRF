@@ -65,6 +65,7 @@ rm -r output/label/*
 python DS_NeRF/run_nerf.py --config DS_NeRF/configs/config.txt --render_factor 1 --prepare --i_weight 1000000000 --i_video 1000000000 --i_feat 4000 --N_iters 4001 --expname statue --datadir ./data/statue --factor 2 --N_gt 0
 ```
 After this, rendered disparities (inverse depths) are ready at `lama/LaMa_test_images`, with their corresponding labels at `lama/LaMa_test_images/label`. 
+Note that please set `--N_gt 40` for other scenes in the provided dataset.
 
 ### Running LaMa to generate geometry and appearance guidance
 
@@ -140,7 +141,7 @@ Now, using the following command, the optimization of the final inpainted NeRF w
 python DS_NeRF/run_nerf.py --config DS_NeRF/configs/config.txt --i_feat 200 --lpips --i_weight 1000000000000 --i_video 1000 --N_iters 10001 --expname statue --datadir ./data/statue --N_gt 0 --factor $factor
 ```
 
-Note that our experiments were done on Nvidia A6000 GPUs. In case of running on GPUs with lower memory, you might get out-of-memory errors. To prevent that, please try increasing the arguments `--lpips_render_factor` and `--patch_len_factor`, or reducing `--lpips_batch_size`. 
+Note that our experiments were done on Nvidia A6000 GPUs. In case of running on GPUs with lower memory, you might get out-of-memory errors. To prevent that, please try increasing the arguments `--lpips_render_factor` and `--patch_len_factor`, or reducing `--lpips_batch_size`. Additionally, note that please set `--N_gt 40` for other scenes in the provided dataset.
 
 #### Notes on mask dilation
 Please note that as mentioned in the paper, the masks are dilated by default with a 5x5 kernel for 5 iterations to ensure that all of the object is masked, and that the effects of the shadow of the unwanted objects on the scene is reduced. If you wish to alter the dilation, first, you need to change the dilations applied by the LaMa model to generate the inpaintings under `lama/saicinpainting/evaluation/refinement.py` at the following line:
