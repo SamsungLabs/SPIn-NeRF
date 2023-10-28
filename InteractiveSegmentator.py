@@ -36,6 +36,7 @@ class InteractiveSegmentator:
         self.ax = self.fig.add_subplot(111)
         self.axim = self.ax.imshow(image)
         self.axim_mask = self.ax.imshow(self.zero_mask)
+        self.text = self.fig.text(0, 0.95, f"1/{self.datalen}", size=20)
 
         self.cid0 = self.fig.canvas.mpl_connect('button_press_event', self.onclick)
         self.cid1 = self.fig.canvas.mpl_connect('key_press_event', self.onpress)
@@ -84,16 +85,18 @@ class InteractiveSegmentator:
         self.fig.canvas.flush_events()
 
     def onpress(self, event):
-        if event.key == 'enter':
-
-            self.save_mask()
-
-            self.curr_idx += 1
-            if self.curr_idx >= self.datalen:
-                self.fig.canvas.mpl_disconnect(self.cid0)
-                self.fig.canvas.mpl_disconnect(self.cid1)
-                plt.close(self.fig)
-                exit(0)
+        if event.key in ['enter', 'backspace']:
+            
+            if event.key == 'enter':
+                self.save_mask()
+                self.curr_idx += 1
+                if self.curr_idx >= self.datalen:
+                    self.fig.canvas.mpl_disconnect(self.cid0)
+                    self.fig.canvas.mpl_disconnect(self.cid1)
+                    plt.close(self.fig)
+                    exit(0)
+            elif event.key == 'backspace':
+                self.curr_idx = max(self.curr_idx - 1, 0)
             
             self.f = self.fnames[self.curr_idx]
             image = self.get_image(self.f)
@@ -104,6 +107,7 @@ class InteractiveSegmentator:
 
             self.axim.set_data(image)
             self.axim_mask.set_data(self.zero_mask)
+            self.text.set_text(f"{self.curr_idx+1}/{self.datalen}")
             for p in self.plots: p.remove()
             self.plots = []
             self.fig.canvas.draw()
