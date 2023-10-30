@@ -195,7 +195,11 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
     for i, c2w in enumerate(render_poses):
         if disp_require_grad or rgb_require_grad:
             if patch_len is not None:
-                masked = np.where(masks[i] != 0)
+                nonzero = (masks[i] != 0)
+                if nonzero.any():
+                    masked = np.where(nonzero)
+                else:
+                    masked = np.where(np.ones_like(nonzero))
                 masked = (masked[0] // render_factor,
                           masked[1] // render_factor)
                 Xs.append(random.randint(

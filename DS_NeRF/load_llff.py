@@ -146,7 +146,7 @@ def _load_data(basedir, factor=None, width=None, height=None, load_imgs=True, pr
     for i, f in enumerate(mskfiles):
         try:
             msk = imread(f)
-            msk = msk / msk.max()
+            msk = msk / max(msk.max(), 1)
             if len(msk.shape) > 2:
                 msk = msk[:, :, 0]
             if msk.shape != (imgs.shape[0], imgs.shape[1]):
