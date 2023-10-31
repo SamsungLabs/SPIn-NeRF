@@ -23,12 +23,13 @@ H, W = cv2.imread(os.path.join(args.src_root, fnames[0])).shape[:2]
 H_dest = args.H if args.H != 0 else H
 W_dest = args.W if args.W != 0 else W
 fr = max(H_dest / H, W_dest / W)
+H, W = round(H*fr), round(W*fr)
 
 for f in tqdm(fnames):
     img = cv2.imread(os.path.join(args.src_root, f))
 
     if fr != 1:
-        img = cv2.resize(img, dsize=(0,0), fx=fr, fy=fr, interpolation=cv2.INTER_AREA)
+        img = cv2.resize(img, dsize=(W, H), interpolation=cv2.INTER_AREA)
 
     if H != H_dest or W != W_dest:
         Hc, Wc = (H-H_dest)//2, (W-W_dest)//2
