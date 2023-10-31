@@ -1,23 +1,7 @@
 dataset=desk
 factor=4
 
-################################# 1. Run COLMAP #################################
-
-# python imgs2poses.py --data_dir data/$dataset
-
-#################################################################################
-
-
-
-########################## 2. Interactive Segmentation ##########################
-
-# python InteractiveSegmentator.py --data_root ./data/$dataset/images_$factor
-
-#################################################################################
-
-
-
-################ 3. Run an initial NeRF for getting the depths  #################
+################ 1. Run an initial NeRF for getting the depths  #################
 
 # rm -rf lama/LaMa_test_images/*
 # rm -rf lama/output/label/*
@@ -26,8 +10,8 @@ factor=4
 # --config DS_NeRF/configs/config.txt \
 # --render_factor 1 \
 # --prepare \
-# --i_weight 1000000000 \
-# --i_video 1000000000 \
+# --i_weight 4000 \
+# --i_video 4000 \
 # --i_feat 4000 \
 # --N_iters 4001 \
 # --expname $dataset \
@@ -41,7 +25,7 @@ cd lama
 export TORCH_HOME=$(pwd)
 export PYTHONPATH=$(pwd)
 
-########### 4. Run LaMa to generate geometry and appearance guidance  ############
+########### 2. Run LaMa to generate geometry and appearance guidance  ############
 
 # python bin/predict.py \
 # refine=True \
@@ -74,13 +58,13 @@ export PYTHONPATH=$(pwd)
 
 cd ..
 
-########################## 5. Run multiview inpainter  ###########################
+########################## 3. Run multiview inpainter  ###########################
 
 # python DS_NeRF/run_nerf.py \
 # --config DS_NeRF/configs/config.txt \
 # --i_feat 200 \
 # --lpips \
-# --i_weight 1000000000000 \
+# --i_weight 10000 \
 # --i_video 1000 \
 # --N_iters 10001 \
 # --expname $dataset \
