@@ -57,8 +57,8 @@ class InteractiveSegmentator:
         return image
     
     def save_mask(self):
-        save_path = os.path.join(self.args.data_root, "label", self.f)
-        save_path255 = os.path.join(self.args.data_root, "label255", self.f)
+        save_path = os.path.join(self.args.data_root, "label", self.f.replace('jpg', 'png'))
+        save_path255 = os.path.join(self.args.data_root, "label255", self.f.replace('jpg', 'png'))
         mask = self.curr_mask[...,None].astype(np.uint8).repeat(3, -1)
         cv2.imwrite(save_path, mask)
         cv2.imwrite(save_path255, mask * 255)

@@ -65,8 +65,33 @@ def _minify(basedir, factors=[], resolutions=[]):
         print('Done')
 
 
+def _load_object_points(basedir, masks, factor=8, bd_factor=.75):
+
+    images = read_images_binary(Path(basedir) / 'sparse' / '0' / 'images.bin')
+    points = read_points3d_binary(
+        Path(basedir) / 'sparse' / '0' / 'points3D.bin')
+    
+    eroded_masks = []
+    for msk in masks:
+        eroded_masks.append(cv2.erode(msk, np.ones((5, 5), np.uint8), iterations=5))
+    
+    object_points = []
+    for point3d_id in points:
+        point3d = points[point3d_id]
+        is_object_point = True
+        for im_id, point2d_id in zip(point3d.image_ids, point3d.point2D_idxs):
+            point2d = images[im_id].xys[point2d_id] / factor
+            x, y = point2d.astype(np.int32)
+            if eroded_masks[im_id-1][y, x] == 0:
+                is_object_point = False
+        if is_object_point:
+            object_points.append(point3d.xyz)
+    object_points = np.stack(object_points, 0)
+
+    return object_points
+
 def _load_data(basedir, factor=None, width=None, height=None, load_imgs=True, prepare=False, refined=False,
-               use_MVSeg=False, args=None):
+               use_MVSeg=False, segmented_NeRF=False, args=None):
     poses_arr = np.load(os.path.join(basedir, 'poses_bounds.npy'))
     # 3 x 5 x N
     poses = poses_arr[:, :-2].reshape([-1, 3, 5]).transpose([1, 2, 0])
@@ -155,7 +180,7 @@ def _load_data(basedir, factor=None, width=None, height=None, load_imgs=True, pr
                     msk, (imgs.shape[1], imgs.shape[0]), interpolation=cv2.INTER_NEAREST)
                 print(msk.shape)
             # todo comment this or change the dilation iterations
-            msk = cv2.dilate(msk, np.ones((5, 5), np.uint8), iterations=5)
+            # masks[i] = cv2.dilate(msk, np.ones((5, 5), np.uint8), iterations=5)
             masks.append(msk)
             mask_indices.append(i)
             # comment this if statement in case you need all of the inpainted rgbs  todo chang != 0 to != len(mskfiles) - 30
@@ -163,6 +188,12 @@ def _load_data(basedir, factor=None, width=None, height=None, load_imgs=True, pr
                 masks[-1] = masks[-1] * (-1)
         except:
             masks.append(-np.ones((imgs.shape[0], imgs.shape[1])))
+
+    object_points = _load_object_points(basedir, masks, factor=factor, bd_factor=.75)
+
+    if not segmented_NeRF:
+        for i, msk in enumerate(masks):
+            masks[i] = cv2.dilate(msk, np.ones((5, 5), np.uint8), iterations=5)
 
     inpainted_depths = []
     for f in depthfiles:
@@ -187,7 +218,7 @@ def _load_data(basedir, factor=None, width=None, height=None, load_imgs=True, pr
     # inpainted_depths = inpainted_depths / np.max(inpainted_depths)
 
     print('Loaded image data', imgs.shape, poses[:, -1, 0], masks.shape)
-    return poses, bds, imgs, masks, inpainted_depths, mask_indices
+    return poses, bds, imgs, masks, inpainted_depths, mask_indices, object_points
 
 
 def normalize(x):
@@ -232,7 +263,7 @@ def render_path_spiral(c2w, up, rads, focal, zdelta, zrate, rots, N):
     return render_poses
 
 
-def recenter_poses(poses):
+def recenter_poses(poses, object_points):
     poses_ = poses + 0
     bottom = np.reshape([0, 0, 0, 1.], [1, 4])
     c2w = poses_avg(poses)
@@ -241,9 +272,13 @@ def recenter_poses(poses):
     poses = np.concatenate([poses[:, :3, :4], bottom], -2)
 
     poses = np.linalg.inv(c2w) @ poses
+    points_bottom = np.ones_like(object_points[:, :1])
+    object_points_ = np.concatenate([object_points, points_bottom], 1)
+    object_points_recentered = np.linalg.inv(c2w) @ object_points_.T
+    object_points_recentered = object_points_recentered[:-1].T
     poses_[:, :3, :4] = poses[:, :3, :4]
     poses = poses_
-    return poses
+    return poses, object_points_recentered
 
 
 #####################
@@ -313,12 +348,13 @@ def spherify_poses(poses, bds):
 
 
 def load_llff_data(basedir, factor=8, recenter=True, bd_factor=.75, spherify=False, path_zflat=False,
-                   spherify_hack=True, prepare=False, refined=False, use_MVSeg=False, args=None):
-    poses, bds, imgs, masks, inpainted_depths, mask_indices = _load_data(basedir,
+                   spherify_hack=True, prepare=False, refined=False, use_MVSeg=False, segmented_NeRF=False, return_object_points=False, args=None):
+    poses, bds, imgs, masks, inpainted_depths, mask_indices, object_points = _load_data(basedir,
                                                                          factor=factor,
                                                                          prepare=prepare,
                                                                          refined=refined,
                                                                          use_MVSeg=use_MVSeg,
+                                                                         segmented_NeRF=segmented_NeRF,
                                                                          args=args)  # factor=8 downsamples original imgs by 8x
     print('Loaded', basedir, bds.min(), bds.max())
 
@@ -340,12 +376,13 @@ def load_llff_data(basedir, factor=8, recenter=True, bd_factor=.75, spherify=Fal
     # Rescale if bd_factor is provided
     sc = 1. if bd_factor is None else 1. / (bds.min() * bd_factor)
     poses[:, :3, 3] *= sc
+    object_points *= sc
     bds *= sc
 
     # print('before recenter:\n', poses[0])
 
     if recenter:
-        poses = recenter_poses(poses)
+        poses, object_points = recenter_poses(poses, object_points)
 
     if spherify:
         poses, render_poses, bds, _, _ = spherify_poses(poses, bds)
@@ -429,6 +466,9 @@ def load_llff_data(basedir, factor=8, recenter=True, bd_factor=.75, spherify=Fal
 
     if inpainted_depths.shape[-1] == 3:
         inpainted_depths = inpainted_depths[:, :, :, 0].squeeze()
+
+    if return_object_points:
+        return images, poses, bds, render_poses, i_test, masks, inpainted_depths, mask_indices, object_points
 
     return images, poses, bds, render_poses, i_test, masks, inpainted_depths, mask_indices
 

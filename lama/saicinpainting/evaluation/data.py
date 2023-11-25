@@ -65,7 +65,7 @@ def list_contains_word(list, word):
 class InpaintingDataset(Dataset):
     def __init__(self, datadir, img_suffix='.jpg', pad_out_to_modulo=None, scale_factor=None):
         self.datadir = datadir
-        self.img_filenames = sorted(list(glob.glob(os.path.join(self.datadir, '*.png'), recursive=False)))
+        self.img_filenames = sorted(list(glob.glob(os.path.join(self.datadir, f'*{img_suffix}'), recursive=False)))
         self.mask_filenames = sorted(list(glob.glob(os.path.join(self.datadir, 'label', '*.png'), recursive=False)))
         if len(self.mask_filenames) != len(self.img_filenames):
             self.img_filenames = [
