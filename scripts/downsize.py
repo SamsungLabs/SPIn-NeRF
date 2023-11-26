@@ -19,12 +19,13 @@ fnames = [f for f in fnames if f[-3:].lower() in ['png', 'jpg']]
 fr = 1 / args.factor
 
 for f in tqdm(fnames):
+    msk_f = f.replace("jpg", "png")
     img = cv2.imread(os.path.join(src_root, f))
-    msk = cv2.imread(os.path.join(src_root, "label", f))
+    msk = cv2.imread(os.path.join(src_root, "label", msk_f))
 
     img = cv2.resize(img, dsize=(0,0), fx=fr, fy=fr, interpolation=cv2.INTER_AREA)
     msk = cv2.resize(msk, dsize=(0,0), fx=fr, fy=fr, interpolation=cv2.INTER_NEAREST)
 
     cv2.imwrite(os.path.join(dst_root, f), img)
-    cv2.imwrite(os.path.join(dst_root, "label", f), msk)
-    cv2.imwrite(os.path.join(dst_root, "label255", f), msk * 255)
+    cv2.imwrite(os.path.join(dst_root, "label", msk_f), msk)
+    cv2.imwrite(os.path.join(dst_root, "label255", msk_f), msk * 255)

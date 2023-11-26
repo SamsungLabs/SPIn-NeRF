@@ -75,6 +75,7 @@ def _load_object_points(basedir, masks, factor=8, bd_factor=.75):
     for msk in masks:
         eroded_masks.append(cv2.erode(msk, np.ones((5, 5), np.uint8), iterations=5))
     
+    H, W = masks[0].shape[:2]
     object_points = []
     for point3d_id in points:
         point3d = points[point3d_id]
@@ -82,6 +83,7 @@ def _load_object_points(basedir, masks, factor=8, bd_factor=.75):
         for im_id, point2d_id in zip(point3d.image_ids, point3d.point2D_idxs):
             point2d = images[im_id].xys[point2d_id] / factor
             x, y = point2d.astype(np.int32)
+            x, y = min(x, W-1), min(y, H-1)
             if eroded_masks[im_id-1][y, x] == 0:
                 is_object_point = False
         if is_object_point:
@@ -439,12 +441,21 @@ def load_llff_data(basedir, factor=8, recenter=True, bd_factor=.75, spherify=Fal
         rads[2] = 0.
         N_rots = 1
         N_views /= 2
+    if hasattr(args, "apply_all_transforms"):
+        if args.apply_all_transforms:
+            N_views = 720
+            zloc = close_depth * .2
+            c2w_path[:3, 3] = c2w_path[:3, 3] + zloc * c2w_path[:3, 2]
+            rads[2] = 0.
+            N_rots = 2
 
     # Generate poses for spiral path
     render_poses = render_path_spiral(
         c2w_path, up, rads, focal, zdelta, zrate=.5, rots=N_rots, N=N_views)
     # end of else
-
+    if hasattr(args, "render_staticcam"):
+        if args.render_staticcam:
+            render_poses = [c2w_path for _ in range(N_views)]
     render_poses = np.array(render_poses).astype(np.float32)
 
     c2w = poses_avg(poses)
@@ -498,7 +509,7 @@ def load_colmap_depth(basedir, factor=8, bd_factor=.75, prepare=False):
 
     poses = get_poses(images)
     # factor=8 downsamples original imgs by 8x
-    _, bds_raw, _, _, _, _ = _load_data(
+    _, bds_raw, _, _, _, _, _ = _load_data(
         basedir, factor=factor, prepare=prepare)
     bds_raw = np.moveaxis(bds_raw, -1, 0).astype(np.float32)
     # print(bds_raw.shape)

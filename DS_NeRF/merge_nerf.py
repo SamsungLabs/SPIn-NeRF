@@ -40,6 +40,48 @@ def visualize(poses, points, save_path):
     visualizer.fig.savefig(save_path)
     return
 
+rot_phi = lambda phi : np.array([
+    [np.cos(phi),0,np.sin(phi)],
+    [0,1,0],
+    [-np.sin(phi),0,np.cos(phi)],
+], dtype=np.float32)
+
+rot_theta = lambda theta : np.array([
+    [1,0,0],
+    [0,np.cos(theta),np.sin(theta)],
+    [0,-np.sin(theta),np.cos(theta)],
+], dtype=np.float32)
+
+def apply_transform(pts, transform):
+    dtype=pts.dtype
+    
+    if "origin" in transform:
+        origin = transform["origin"]
+    else:
+        origin = [0, 0, 0]
+    origin = torch.Tensor(origin).to(dtype=dtype, device=device)[None, None]
+
+    if "scale" in transform:
+        scale = transform["scale"]
+    else:
+        scale = 1.
+
+    if "rotat" in transform:
+        rotat = transform["rotat"]
+    else:
+        rotat = [0, 0]
+    phi, theta = rotat
+    rotat = rot_phi(-phi/180.*np.pi) @ rot_theta(-theta/180.*np.pi)
+    rotat = torch.Tensor(rotat).to(dtype=dtype, device=device)
+
+    if "trans" in transform:
+        trans = transform["trans"]
+    else:
+        trans = [0, 0, 0]
+    trans = torch.Tensor(trans).to(dtype=dtype, device=device)[None, None]
+
+    return origin + torch.sum((pts - origin)[..., None, :] * rotat, -1) / scale - trans
+
 def batchify(fn, chunk):
     """Constructs a version of 'fn' that applies to smaller batches.
     """
@@ -224,9 +266,7 @@ def render_rays(ray_batch,
                 scene_network_fine=None,
                 lindisp=False,
                 white_bkgd=False,
-                origin=None,
-                scale=1.0,
-                linewidth=0.,
+                transform=None,
                 ):
     """Volumetric rendering.
     Args:
@@ -265,9 +305,9 @@ def render_rays(ray_batch,
     z_vals = z_vals.expand([N_rays, N_samples])
 
     pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :, None]  # [N_rays, N_samples, 3]
-    query_pts = (pts - origin) / scale + origin
-    query_pts[:, :, 1] += (1-scale) * linewidth
-    object_raw = network_query_fn(query_pts, viewdirs, object_network_fn)
+    if transform is not None:
+        pts = apply_transform(pts, transform)
+    object_raw = network_query_fn(pts, viewdirs, object_network_fn)
     rgb_map, disp_map, acc_map, object_weights, _, _ = raw2outputs(object_raw, z_vals, rays_d, white_bkgd=white_bkgd)
 
     scene_raw = network_query_fn(pts, viewdirs, scene_network_fn)
@@ -280,9 +320,9 @@ def render_rays(ray_batch,
         object_z_samples = object_z_samples.detach()
         object_z_vals, _ = torch.sort(torch.cat([z_vals, object_z_samples], -1), -1)
         object_pts = rays_o[..., None, :] + rays_d[..., None, :] * object_z_vals[..., :, None]  # [N_rays, N_samples + N_importance, 3]
-        object_query_pts = (object_pts - origin) / scale + origin
-        object_query_pts[:, :, 1] += (1-scale) * linewidth
-        object_raw = network_query_fn(object_query_pts, viewdirs, object_network_fine)
+        if transform is not None:
+            object_pts = apply_transform(object_pts, transform)
+        object_raw = network_query_fn(object_pts, viewdirs, object_network_fine)
 
         scene_z_samples = sample_pdf(z_vals_mid, scene_weights[..., 1:-1], N_importance, det=True)
         scene_z_samples = scene_z_samples.detach()
@@ -522,6 +562,8 @@ def config_parser():
     parser.add_argument("--lpips_lambda", type=float, default=0.01)
 
     parser.add_argument("--scale", type=float, default=1.0)
+    parser.add_argument("--apply_all_transforms", action="store_true")
+    parser.add_argument("--render_staticcam", action="store_true")
     return parser
 
 def main():
@@ -571,17 +613,36 @@ def main():
     bottom = np.percentile(object_points[:, 1], 5)
     linewidth = np.abs(object_mean[1] - bottom)
 
-    render_kwargs["origin"] = torch.FloatTensor(object_mean).to(device)[None, None]
-    render_kwargs["scale"] = args.scale
-    render_kwargs["linewidth"] = linewidth
+    render_kwargs["transform"] = {"origin": object_mean}
+    render_kwargs["transform"]["scale"] = args.scale
+    render_kwargs["transform"]["trans"] = [0, -(1-args.scale)*linewidth, 0]
 
     # Move testing data to GPU
     render_poses = torch.Tensor(render_poses).to(device)
 
     with torch.no_grad():
         print('render poses shape', render_poses.shape)
-        
-        rgbs, disps = render_path(render_poses, hwf, args.chunk, render_kwargs, render_factor=args.render_factor)
+        if args.apply_all_transforms:
+            rgbs_all = []
+            disps_all = []
+            for i in tqdm(range(720)):
+                render_pose = render_poses[i:i+1]
+                render_kwargs["transform"] = {"origin": object_mean}
+                if i < 240:
+                    render_kwargs["transform"]["scale"] = 1 - 0.2 * np.sin(i/120*np.pi)
+                elif i < 360:
+                    render_kwargs["transform"]["rotat"] = [-15 * np.sin(i/60*np.pi), 0]
+                elif i < 480:
+                    render_kwargs["transform"]["rotat"] = [0, -15 * np.sin(i/60*np.pi)]
+                else:
+                    render_kwargs["transform"]["trans"] = [0.5 * np.sin(i/120*np.pi), 0.5 * (1-np.cos(i/120*np.pi)), 0]
+                rgbs, disps = render_path(render_pose, hwf, args.chunk, render_kwargs, render_factor=args.render_factor)
+                rgbs_all.append(rgbs)
+                disps_all.append(disps)
+            rgbs = np.concatenate(rgbs_all, 0)
+            disps = np.concatenate(rgbs_all, 0)
+        else:
+            rgbs, disps = render_path(render_poses, hwf, args.chunk, render_kwargs, render_factor=args.render_factor)
         print('Done rendering')
         imageio.mimwrite(os.path.join(
             logdir, 'rgb.mp4'), to8b(rgbs), fps=30, quality=8)
