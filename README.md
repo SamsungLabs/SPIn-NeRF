@@ -56,6 +56,8 @@ We offer quantitative measures to assess how well the edits align with the text 
 
 In this project, we borrowed code from SPIn- NeRF, SAM, Colmap, instant-ngp, ML-Neuman, Instruct- NeRF2NeRF, etc.
 
+| Reference | Purpose |
+| --- | --- |
 | SPIn-NeRF | Multiview inpainting |
 | Instruct-NeRF2NeRF | Iterative dataset update |
 | SAM | Interactive object segmentation and mask generation |
