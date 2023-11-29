@@ -1,5 +1,3 @@
-# readme
-
 # SIn-NeRF2NeRF: Editing 3D Scenes with Instructions through Segmentation and Inpainting
 
 ![teaser.png](readme%206e8ba03ecbe04d6f9c9358a593d9a079/teaser.png)
@@ -59,7 +57,6 @@ We offer quantitative measures to assess how well the edits align with the text 
 In this project, we borrowed code from SPIn- NeRF, SAM, Colmap, instant-ngp, ML-Neuman, Instruct- NeRF2NeRF, etc.
 
 | SPIn-NeRF | Multiview inpainting |
-| --- | --- |
 | Instruct-NeRF2NeRF | Iterative dataset update |
 | SAM | Interactive object segmentation and mask generation |
 | COLMAP | Get true depth using camera parameters |
