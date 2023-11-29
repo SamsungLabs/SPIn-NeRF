@@ -42,7 +42,7 @@ We develop a code to edit the object scene based on text prompts by porting the 
 
 **Qualitative Results**
 
-[rd.mp4](readme%206e8ba03ecbe04d6f9c9358a593d9a079/rd.mp4)
+![rd.gif](readme%206e8ba03ecbe04d6f9c9358a593d9a079/rd.gif)
 
 **Quantitative Results**
 
