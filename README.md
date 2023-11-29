@@ -73,8 +73,6 @@ In this project, we borrowed code from SPIn- NeRF, SAM, Colmap, instant-ngp, ML-
 
 ## Reference
 
----
-
 [https://instruct-nerf2nerf.github.io](https://instruct-nerf2nerf.github.io/)
 
 [https://spinnerf3d.github.io](https://spinnerf3d.github.io/)
