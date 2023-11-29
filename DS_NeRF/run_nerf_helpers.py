@@ -12,7 +12,14 @@ from torch import searchsorted
 from matplotlib import pyplot as plt
 
 # Misc
-img2mse = lambda x, y: torch.mean((x - y) ** 2)
+def img2mse(rgb1, rgb2, acc1=None, acc2=None):
+    if acc1 is not None and acc2 is not None:
+        bg_color = torch.rand_like(rgb1)
+        rgb1_blended = rgb1 * acc1[...,None] + bg_color * (1 - acc1[...,None])
+        rgb2_blended = rgb2 * acc2[...,None] + bg_color * (1 - acc2[...,None])
+        return torch.mean((rgb1_blended - rgb2_blended) ** 2)
+    else:
+        return torch.mean((rgb1 - rgb2) ** 2)
 img2l1 = lambda x, y: torch.mean(torch.abs(x - y))
 mse2psnr = lambda x: -10. * torch.log(x) / torch.log(torch.Tensor([10.]))
 to8b = lambda x: (255 * np.clip(x, 0, 1)).astype(np.uint8)
@@ -384,12 +391,13 @@ def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, white_bkgd=False, pytest=F
     weights = alpha * torch.cumprod(torch.cat([torch.ones((alpha.shape[0], 1)), 1. - alpha + 1e-10], -1), -1)[:, :-1]
     if detach_weights:
         rgb_map = torch.sum(weights[..., None].detach() * rgb, -2)  # [N_rays, 3]
+        acc_map = torch.sum(weights.detach(), -1)
     else:
         rgb_map = torch.sum(weights[..., None] * rgb, -2)  # [N_rays, 3]
+        acc_map = torch.sum(weights, -1)
 
     depth_map = torch.sum(weights * z_vals, -1)
     disp_map = 1. / torch.max(1e-10 * torch.ones_like(depth_map), depth_map / torch.sum(weights, -1))
-    acc_map = torch.sum(weights, -1)
 
     if white_bkgd:
         rgb_map = rgb_map + (1. - acc_map[..., None])

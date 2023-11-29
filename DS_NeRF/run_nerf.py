@@ -34,6 +34,8 @@ from torch.utils.data import DataLoader
 from utils.generate_renderpath import generate_renderpath
 import cv2
 import lpips
+from ip2p.ip2p import ip2p
+from rembg import remove
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 torch.cuda.set_device(0)
@@ -187,6 +189,7 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
         )
 
     rgbs = []
+    accs = []
     disps = []
 
     Xs = []
@@ -195,7 +198,11 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
     for i, c2w in enumerate(render_poses):
         if disp_require_grad or rgb_require_grad:
             if patch_len is not None:
-                masked = np.where(masks[i] != 0)
+                nonzero = (masks[i] != 0)
+                if nonzero.any():
+                    masked = np.where(nonzero)
+                else:
+                    masked = np.where(np.ones_like(nonzero))
                 masked = (masked[0] // render_factor,
                           masked[1] // render_factor)
                 Xs.append(random.randint(
@@ -225,8 +232,10 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
 
         if rgb_require_grad:
             rgbs.append(rgb)
+            accs.append(acc)
         else:
             rgbs.append(rgb.detach().cpu().numpy())
+            accs.append(acc.detach().cpu().numpy())
 
         if savedir is not None:
             rgb_dir = os.path.join(savedir, 'rgb')
@@ -301,8 +310,12 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
 
     if rgb_require_grad:
         rgbs = torch.stack(rgbs, 0)
+        accs = torch.stack(accs, 0)
     else:
         rgbs = np.stack(rgbs, 0)
+        accs = np.stack(accs, 0)
+
+    rgbs = rgbs * accs[..., None]
 
     return rgbs, disps, (Xs, Ys)
 
@@ -532,19 +545,20 @@ def create_nerf_tcnn(args):
     start = 0
     basedir = args.basedir
     expname = args.expname
-
+    base_expname = args.base_expname
+    load_expname = base_expname if base_expname != "None" else expname
     ##########################
 
     # Load checkpoints
     if args.ft_path is not None and args.ft_path != 'None':
         ckpts = [args.ft_path]
     else:
-        ckpts = [os.path.join(basedir, expname, f) for f in sorted(os.listdir(os.path.join(basedir, expname))) if
+        ckpts = [os.path.join(basedir, load_expname, f) for f in sorted(os.listdir(os.path.join(basedir, load_expname))) if
                  'tar' in f]
 
     if args.masked_NeRF or args.object_removal:
         ckpts = []
-    ckpts = []  # todo remove this line!
+    # ckpts = []  # todo remove this line!
 
     print('Found ckpts', ckpts)
     if len(ckpts) > 0 and not args.no_reload:
@@ -910,6 +924,8 @@ def config_parser():
                         help='Only train NeRF on unmasked pixels')
     parser.add_argument("--object_removal", action='store_true',
                         help='Remove the object and shrink the masks')
+    parser.add_argument("--segmented_NeRF", action='store_true',
+                        help='Train NeRF for the masked region')
     parser.add_argument("--tmp_images", action='store_true',
                         help='Use images in lama_images_tmp for ablation studies')
     parser.add_argument("--no_geometry", action='store_true',
@@ -922,6 +938,17 @@ def config_parser():
     parser.add_argument("--lpips_batch_size", type=int, default=4,
                         help='The number of patches used in each iteration for the perceptual loss')
 
+    parser.add_argument("--in2n", action='store_true')
+    parser.add_argument("--base_expname", type=str, default="None",
+                        help='base experiment name. only used for in2n')
+    parser.add_argument("--prompt", type=str, default="Don't change the image")
+    parser.add_argument("--negative_prompt", type=str, default="")
+    parser.add_argument("--guidance_scale", type=float, default=7.5)
+    parser.add_argument("--image_guidance_scale", type=float, default=1.5)
+    parser.add_argument("--diffusion_steps", type=int, default=20)
+    parser.add_argument("--lower_bound", type=float, default=0.02)
+    parser.add_argument("--upper_bound", type=float, default=0.98)
+    parser.add_argument("--lpips_lambda", type=float, default=0.01)
     return parser
 
 
@@ -973,6 +1000,10 @@ def train():
         for param in LPIPS.parameters():
             param.requires_grad = False
 
+    if args.in2n:
+        args.colmap_depth = False
+        args.depth_loss = False
+
     # Load data
 
     if args.dataset_type == 'llff':
@@ -985,6 +1016,7 @@ def train():
                                                                                                          bd_factor=.75,
                                                                                                          spherify=args.spherify,
                                                                                                          prepare=args.prepare,
+                                                                                                         segmented_NeRF=args.segmented_NeRF,
                                                                                                          args=args)
 
         hwf = poses[0, :3, -1]
@@ -1112,6 +1144,12 @@ def train():
         print('Unknown dataset type', args.dataset_type, 'exiting')
         return
 
+    if args.in2n:
+        data_evol_order = np.random.permutation(i_train)
+        original_images = images.copy()
+        if args.segmented_NeRF:
+            original_masks = masks.copy()
+
     # Cast intrinsics to right types
     H, W, focal = hwf
     H, W = int(H), int(W)
@@ -1130,6 +1168,9 @@ def train():
     basedir = args.basedir
     expname = args.expname
     os.makedirs(os.path.join(basedir, expname), exist_ok=True)
+    if args.in2n:
+        logdir = os.path.join(basedir, expname, "data_evol")
+        os.makedirs(logdir, exist_ok=True)
     f = os.path.join(basedir, expname, 'args.txt')
     with open(f, 'w') as file:
         for arg in sorted(vars(args)):
@@ -1148,9 +1189,9 @@ def train():
         render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer = create_nerf_tcnn(
             args)
 
-    gui = threading.Thread(target=gui_application,
-                           args=(args, render_kwargs_test,))
-    gui.start()
+    # gui = threading.Thread(target=gui_application,
+    #                        args=(args, render_kwargs_test,))
+    # gui.start()
 
     global_step = start
 
@@ -1221,7 +1262,7 @@ def train():
 
     # Prepare raybatch tensor if batching random rays
     N_rand = args.N_rand
-    use_batching = not args.no_batching
+    use_batching = (not args.no_batching) and (not args.in2n)
     if use_batching:
         # For random ray batching
         print('get rays')
@@ -1268,6 +1309,21 @@ def train():
             print('get depth rays')
             rays_depth_list = []
             for i in i_train:
+                if args.prepare and args.segmented_NeRF:
+                    curr_mask = masks[i]
+                    curr_mask = cv2.erode(curr_mask, np.ones((5, 5), np.uint8), iterations=5)
+                    indices = [_ for _ in range(len(depth_gts[i]['coord']))
+                               if curr_mask[
+                                   min(int(depth_gts[i]['coord'][_]
+                                       [1]), curr_mask.shape[0] - 1)
+                    ][
+                                   min(int(depth_gts[i]['coord'][_]
+                                       [0]), curr_mask.shape[1] - 1)
+                    ] == 1
+                    ]
+                    depth_gts[i]['coord'] = depth_gts[i]['coord'][indices]
+                    depth_gts[i]['weight'] = depth_gts[i]['weight'][indices]
+                    depth_gts[i]['depth'] = depth_gts[i]['depth'][indices]
                 if not args.prepare:
                     indices = [_ for _ in range(len(depth_gts[i]['coord']))
                                if masks[i][
@@ -1333,6 +1389,8 @@ def train():
 
     # Move training data to GPU
     images = torch.Tensor(images).to(device)
+    if args.segmented_NeRF:
+        alphas = torch.Tensor(masks).to(device)
     poses = torch.Tensor(poses).to(device)
     if use_batching:
         # rays_rgb = torch.Tensor(rays_rgb).to(device)
@@ -1416,6 +1474,8 @@ def train():
             # Random from one image
             img_i = np.random.choice(i_train)
             target = images[img_i]
+            if args.segmented_NeRF:
+                label = alphas[img_i]
             pose = poses[img_i, :3, :4]
 
             if N_rand is not None:
@@ -1450,6 +1510,12 @@ def train():
                 batch_rays = torch.stack([rays_o, rays_d], 0)
                 target_s = target[select_coords[:, 0],
                                   select_coords[:, 1]]  # (N_rand, 3)
+                batch_rays_clf = batch_rays
+                target_clf = target_s
+                if args.segmented_NeRF:
+                    label_s = label[select_coords[:, 0],
+                                    select_coords[:, 1]]  # (N_rand)
+                    label_s_clf = label_s
 
         #####  Core optimization loop  #####
         rgb, disp, acc, depth, extras = render(H, W, focal, chunk=args.chunk, rays=batch_rays_clf,
@@ -1462,7 +1528,7 @@ def train():
                                                                        detach_weights=False,
                                                                        **render_kwargs_train)
         else:
-            rgb_complete, _, _, _, extras_complete = render(H, W, focal, chunk=args.chunk, rays=batch_rays,
+            rgb_complete, _, acc_complete, _, extras_complete = render(H, W, focal, chunk=args.chunk, rays=batch_rays,
                                                             verbose=i < 10, retraw=True, detach_weights=True,
                                                             **render_kwargs_train)
 
@@ -1479,14 +1545,25 @@ def train():
                 depth_col = depth
 
         optimizer.zero_grad()
-        img_loss = img2mse(rgb, target_clf)
+        if args.segmented_NeRF:
+            img_loss = img2mse(rgb, target_clf, acc1=acc, acc2=label_s_clf)
+        else:
+            img_loss = img2mse(rgb, target_clf)
+
         psnr = mse2psnr(img_loss)
 
         if not args.masked_NeRF and not args.object_removal:
-            img_loss += img2mse(rgb_complete, target_s)
+            if args.segmented_NeRF:
+                img_loss += img2mse(rgb_complete, target_s, acc1=acc_complete, acc2=label_s)
+            else:
+                img_loss += img2mse(rgb_complete, target_s)
+
             # img_loss += img2l1(rgb_complete, target_s)
             if 'rgb0' in extras_complete and not args.no_coarse:
-                img_loss0 = img2mse(extras_complete['rgb0'], target_s)
+                if args.segmented_NeRF:
+                    img_loss0 = img2mse(extras_complete['rgb0'], target_s, acc1=extras_complete['acc0'], acc2=label_s)
+                else:
+                    img_loss0 = img2mse(extras_complete['rgb0'], target_s)
                 img_loss += img_loss0
 
         depth_loss = 0
@@ -1510,7 +1587,10 @@ def train():
             loss += 0.001 * acc_complete.mean()
 
         if 'rgb0' in extras and not args.no_coarse:
-            img_loss0 = img2mse(extras['rgb0'], target_clf)
+            if args.segmented_NeRF:
+                img_loss0 = img2mse(extras['rgb0'], target_clf, acc1=extras['acc0'], acc2=label_s_clf)
+            else:
+                img_loss0 = img2mse(extras['rgb0'], target_clf)
             loss = loss + img_loss0
 
         if not args.prepare and not args.object_removal and not args.no_geometry:
@@ -1543,7 +1623,7 @@ def train():
                                                 render_factor=lpips_render_factor,
                                                 rgb_require_grad=True,
                                                 need_alpha=False,
-                                                detach_weights=True,
+                                                detach_weights=(not args.in2n),
                                                 patch_len=patch_len,
                                                 masks=masks[idx]
                                                 )
@@ -1558,7 +1638,7 @@ def train():
 
                 # todo calculate for all rgbs at once
                 lpips_loss += LPIPS(prediction, target).mean()
-            loss += lpips_loss / batch_size / 100
+            loss += args.lpips_lambda * lpips_loss / batch_size
 
         if i % args.i_feat == 0 and i > 0:  # calculate inpainted depths
             if args.prepare:
@@ -1699,6 +1779,58 @@ def train():
         if i % args.i_print == 0:
             tqdm.write(
                 f"[TRAIN] Iter: {i} Loss: {loss.item()}  PSNR: {psnr.item()}")
+        
+        if i % 10 == 0 and args.in2n:
+            i_edit = data_evol_order[(i // 10) % len(i_train)]
+            orig_img = original_images[i_edit]
+            if args.segmented_NeRF:
+                orig_msk = original_masks[i_edit]
+                orig_img = orig_img * orig_msk[...,None]
+            with torch.no_grad():
+                rendered_img, _, _ = render_path(poses[[i_edit]], hwf, args.chunk, render_kwargs_test, render_factor=args.render_factor)
+            
+            rendered_img = rendered_img[0]
+            
+            text_embedding = ip2p.pipe._encode_prompt(args.prompt, device=device, num_images_per_prompt=1, do_classifier_free_guidance=True, negative_prompt=args.negative_prompt)
+
+            image = torch.FloatTensor(rendered_img).to(device)
+            image = image.unsqueeze(dim=0).permute(0, 3, 1, 2)
+
+            image_cond = torch.FloatTensor(orig_img).to(device)
+            image_cond = image_cond.unsqueeze(dim=0).permute(0, 3, 1, 2)
+
+            edited_image = ip2p.edit_image(
+                text_embeddings = text_embedding.float(),
+                image = image,
+                image_cond = image_cond,
+                guidance_scale=args.guidance_scale,
+                image_guidance_scale=args.image_guidance_scale,
+                diffusion_steps=args.diffusion_steps,
+                lower_bound=args.lower_bound,
+                upper_bound=args.upper_bound,
+            )
+
+            # resize to original image size (often not necessary)
+            if (edited_image.size() != image.size()):
+                edited_image = torch.nn.functional.interpolate(edited_image, size=image.size()[2:], mode='bilinear')
+            
+            edited_image = edited_image.squeeze(dim=0).permute(1,2,0)
+            edited_image = edited_image.detach()
+
+            images[i_edit] = edited_image
+
+            if args.segmented_NeRF:
+                rembg_input = (255 * edited_image.cpu().numpy()).astype(np.uint8)
+                rembg_output = remove(rembg_input)
+                edited_mask = rembg_output.astype(np.float32)[...,-1] / 255
+
+                alphas[i_edit] = torch.FloatTensor(edited_mask).to(device)
+
+            # save
+            if i % 10 == 0:
+                log_filename = os.path.join(logdir, f"iter{i:06d}_{i_edit:02d}.png")
+                log_img = np.concatenate([orig_img, rendered_img, edited_image.cpu().numpy()], 1)
+                imageio.imwrite(log_filename, to8b(log_img))
 
         global_step += 1
 
