@@ -1,6 +1,6 @@
 # SPIn-NeRF: Multiview Segmentation and Perceptual Inpainting with Neural Radiance Fields
 
-[**Project**](https://spinnerf3d.github.io/) | [**Paper**](https://arxiv.org/abs/2211.12254) | [**YouTube**](https://youtu.be/WEgJf1WC5SQ) | [**Dataset**](https://drive.google.com/drive/folders/1N7D4-6IutYD40v9lfXGSVbWrd47UdJEC)
+[**Project**](https://spinnerf3d.github.io/) | [**Paper**](https://arxiv.org/abs/2211.12254) | [**YouTube**](https://youtu.be/WEgJf1WC5SQ) 
 
 Pytorch implementation of SPIn-NeRF. SPIn-NeRF leverages 2D priors from image inpainters, and enables view-consistent inpainting of NeRFs.
 
@@ -24,8 +24,7 @@ You will also need [COLMAP](https://github.com/colmap/colmap) installed to compu
 
 ### Dataset preparation
 
-Download the zip files of the dataset from [here](https://drive.google.com/drive/folders/1N7D4-6IutYD40v9lfXGSVbWrd47UdJEC?usp=share_link). Extract them under `/data`. 
-Here, we provide information for running the statue scene. For other scenes, a similar approach with potentially different `factor` can be done. 
+Extract the data under `/data`. Here, we provide information for running the statue scene. For other scenes, a similar approach with potentially different `factor` can be done. 
 
 Extract `statue.zip` under `/data`. This can be done with `unzip statue.zip -d data`. You might need to install unzip with `sudo apt-get install unzip`. 
 
